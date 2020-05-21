@@ -129,4 +129,7 @@ dmypy.json
 .pyre/
 
 # images
-.jpg
+*.jpg
+
+#botconfig
+botconfig.py
