@@ -20,6 +20,9 @@ def metadata(soup):
     if(source[0] == "bmi Epinal"):
         metadata['institution'] = u"Bibliothèque multimédia intercommunale d'Épinal"
         metadata['category'] = u"Collections of the Bibliothèque multimédia intercommunale d'Épinal"
+    if(source[0] == "Bibliothèques de Nancy"):
+        metadata['institution'] = u"Bibliothèque municipale de Nancy"
+        metadata['category']= u"Collections of the Bibliothèque municipale de Nancy"
     return metadata
 
 def upload(url, soup, metadata):
@@ -37,17 +40,17 @@ def upload(url, soup, metadata):
     commons.login(username=botconfig.USER, password=botconfig.PASS)
     text = u"".join([
         u"== {{int:filedesc}}==\n",
-        u"{{Artwork",
-        u"|title=",metadata['title'],
-        u"|source=",url,
-        u"|institution={{Institution:",metadata['institution']+"}}",
-        u"|id=",metadata['inventaire'],
-        u"|date=",metadata['date'],
-        u"|description={{fr|",metadata['description'],u"}}",
-        u"}}\n",
+        u"{{Artwork\n",
+        u"|title=",metadata['title'],u"\n",
+        u"|source=",url,u"\n",
+        u"|institution={{Institution:",metadata['institution'],"}}\n",
+        u"|id=",metadata['inventaire'],u"\n",
+        u"|date=",metadata['date'],u"\n",
+        u"|description={{fr|",metadata['description'],u"}}\n",
+        u"}}\n\n",
         u"=={{int:license-header}}==\n",
-        "{{PD-old}}",
-        u"[[Category:",metadata['category'],"]]",
+        "{{PD-old}}\n\n",
+        u"[[Category:",metadata['category'],"]]\n",
         u"[[Category:Limédia galeries]]"]).encode('utf-8')
     print('Upload '+imageName)
     commons.upload(open(imageName, 'rb'), u'File:{}'.format(imageName), description=text, ignore=True)
