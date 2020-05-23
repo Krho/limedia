@@ -11,15 +11,24 @@ from bs4 import BeautifulSoup
 import botconfig
 
 rootURL = 'https://galeries.limedia.fr'
-csvFile = open('metadata.csv', 'wb')
+
 errorsFile = open('errors.log', 'wb')
-fields = [u'imageName', u'title', u'imageURL', u'author', u'date', u'technique', u'inventaire', u'dimensions',
- u'object_type', u'topic', u'category', u'institution', u'description', u'notes']
-writer = csv.DictWriter(csvFile, fieldnames=fields, encoding='utf-8')
-blackList = [u'/ark:/18128/dxvm8l0jlxf4hqs0/', u'/ark:/18128/dwpb3g26mmbdlgsk/', u'/ark:/31124/dlt9kgkmrvf7h0nf/', u'/ark:/18128/dbwv3060c97k8089/',
- u'/ark:/18128/dwtbg2mrsf8l2wd1/', u'/ark:/18128/dtk50r3l6prj61q9/', u"/ark:/18128/d65tz4vjprp1vrpv/"]
 
 optionalFields = ['notes', 'dimensions']
+
+fields = [u'imageName', u'title', u'imageURL', u'author', u'date', u'technique', u'inventaire', u'dimensions',
+ u'object_type', u'topic', u'category', u'institution', u'description', u'notes']
+csvFileName = 'metadata.csv'
+blackList = [row['imageURL'] for row in csv.DictReader(open(csvFileName, 'rb'))]
+csvFile = open(csvFileName, 'wb')
+writer = csv.DictWriter(csvFile, fieldnames=fields, encoding='utf-8')
+
+categoryRoot = u"Limédia galeries - "
+limediaCategory = u"[[Category:Limédia galeries]]"
+
+commons = mwclient.Site('commons.wikimedia.org')
+commons.login(username=botconfig.USER, password=botconfig.PASS)
+    
 
 def image_URL(soup):
     script = soup.findAll('script')[2].string
@@ -123,52 +132,64 @@ def outputLines(metadata, url):
     lines.extend([u"}}\n\n",
         u"=={{int:license-header}}==\n",
         u"{{PD-old}}\n\n",
-        u"[[Category:",metadata['category'],"]]\n",
-        u"[[Category:Jeanne d'Arc]]\n",
-        u"[[Category:Limédia galeries]]"])
+        u"[[Category:",metadata['category'],"]]\n"])
+    lines.extend(categories(metadata['topic']))
     return lines
 
-def upload(url, soup, metadata):
-    imageRequest = requests.get(metadata['imageURL'])
-    image = imageRequest.content
-    # Save file
-    open(metadata['imageName'], 'wb').write(imageRequest.content)
-    # Upload to commons
-    commons = mwclient.Site('commons.wikimedia.org')
-    commons.login(username=botconfig.USER, password=botconfig.PASS)
-    lines = outputLines(metadata, url)
-    text = u"".join(lines).encode('utf-8')
-    print('Uploading '+metadata['imageName'])
-    try:
-        commons.upload(open(metadata['imageName'], 'rb'), u'File:{}'.format(metadata['imageName']), description=text, ignore=True)
-    except Exception as error:
-        errorsFile.write(u"".join(["\n",metadata['imageName']," - ",url]).encode('utf-8'))
-        print(type(error))
-    os.remove(metadata['imageName'])
+def categories(topics):
+    categories = [limediaCategory]
+    for topic in topics:
+        categoryName = categoryRoot+topic
+        categoryPage = commons.pages["Category:"+categoryName]
+        if len(categoryPage.text()) == 0:
+            print(categoryPage.name)
+            categoryPage.save(limediaCategory, summary="#LimediaGallery creating temporary category")
+            categories.append(u"[[Category:"+categoryName+u"]]\n")
+    return categories
 
-def documentsFromSubject(subject):
-    subjectURL = 'https://galeries.limedia.fr/recherche/?subjects='+subject
-    pageURL = subjectURL+'&page='
-    r = requests.get(subjectURL, allow_redirects=True)
+
+def upload(url, soup, metadata):
+    if (u"manuscrit" not in metadata['object_type']):
+        print('Uploading '+metadata['imageName'])
+        imageRequest = requests.get(metadata['imageURL'])
+        image = imageRequest.content
+        # Save file
+        open(metadata['imageName'], 'wb').write(imageRequest.content)
+        # Upload to commons
+        lines = outputLines(metadata, url)
+        text = u"".join(lines).encode('utf-8')
+        try:
+            commons.upload(open(metadata['imageName'], 'rb'), u'File:{}'.format(metadata['imageName']), description=text, ignore=True)
+        except Exception as error:
+            errorsFile.write(u"".join(["\n",metadata['imageName']," - ",url]).encode('utf-8'))
+            print(type(error))
+        os.remove(metadata['imageName'])
+
+def uploadDocuments(search_param):
+    pageURL = 'https://galeries.limedia.fr/recherche/?'+search_param+'&page='
+    r = requests.get(pageURL, allow_redirects=True)
     pageSoup = BeautifulSoup(r.content, features="lxml")
-    nb_pages = int(pageSoup.find_all("li", "num-page")[2].contents[0].contents[0])
-    for i in range(nb_pages-3):
-        url = pageURL+str(i+3)
+    num_page = pageSoup.find_all("li", "num-page")
+    nb_pages = int(num_page[2].contents[0].contents[0]) if len(num_page) > 0 else 1
+    for i in range(nb_pages):
+        url = pageURL+str(i+1)
         print(url)
         pageRequest = requests.get(url, allow_redirects=True)
         soup = BeautifulSoup(pageRequest.content, features="lxml")
         documentLinks = soup.findAll("a", "titre")
         for documentLink in documentLinks:
-            key = documentLink['href']
-            if key not in blackList:
-                documentURL = rootURL+key
-                documentRequest = requests.get(documentURL, allow_redirects=True)
-                documentSoup = BeautifulSoup(documentRequest.content, features="lxml")
-                data = metadata(documentSoup)
-                upload(documentURL, documentSoup, data)
+            documentURL = rootURL+documentLink['href']
+            documentRequest = requests.get(documentURL, allow_redirects=True)
+            documentSoup = BeautifulSoup(documentRequest.content, features="lxml")
+            data = metadata(documentSoup)
+            #if data['imageURL'] not in blackList:
+            upload(documentURL, documentSoup, data)
 
 def main():
-    subject = 'Jeanne%20d%27Arc%20(sainte%20;%201412-1431)'
-    documentsFromSubject(subject)
+    prefixes = [u"subjects=", u"filter_location="]
+    # subject = 'Jeanne%20d%27Arc%20(sainte%20;%201412-1431)'
+    location = u"ludres (meurthe-et-moselle)"
+    search_param = prefixes[1]+location
+    uploadDocuments(search_param)
 
 main()
