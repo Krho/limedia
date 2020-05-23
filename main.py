@@ -17,10 +17,10 @@ errorsFile = open('errors.log', 'wb')
 optionalFields = ['notes', 'dimensions']
 
 fields = [u'imageName', u'title', u'imageURL', u'author', u'date', u'technique', u'inventaire', u'dimensions',
- u'object_type', u'topic', u'category', u'institution', u'description', u'notes']
+ u'object_type', u'topic', u'category', u'institution', u'description', u'notes', u'source']
 csvFileName = 'metadata.csv'
 blackList = [row['imageURL'] for row in csv.DictReader(open(csvFileName, 'rb'))]
-csvFile = open(csvFileName, 'wb')
+csvFile = open(csvFileName, 'a')
 writer = csv.DictWriter(csvFile, fieldnames=fields, encoding='utf-8')
 
 categoryRoot = u"Limédia galeries - "
@@ -62,8 +62,9 @@ def updateInstitution(metadata, institution):
 
 def retrieveTopics(source):
     topics = []
-    for i in range((len(source.next_sibling.next_sibling.contents)-1)/4):
-        topic = source.next_sibling.next_sibling.contents[4*i+1]
+    contents = source.next_sibling.next_sibling.contents
+    for i in range((len(contents)+2)/4):
+        topic = contents[4*i+1]
         topics.append(unicode(topic.contents[1].contents[0][26:].split("\n")[0]))
     return topics
 
@@ -108,8 +109,6 @@ def metadata(soup):
         retrieveData(source, metadata)
     metadata['imageName'] = unicode(metadata['title'][:100].replace("[","").replace("]","").replace("/","sur")+" "+metadata['inventaire'].replace("/","")+".jpg")
     metadata['imageURL'] = image_URL(soup)
-    writer.writeheader()
-    writer.writerow(metadata)
     return metadata
 
 def outputLines(metadata, url):
@@ -165,6 +164,14 @@ def upload(url, soup, metadata):
             print(type(error))
         os.remove(metadata['imageName'])
 
+def uploadDocument(documentURL):
+    documentRequest = requests.get(documentURL, allow_redirects=True)
+    documentSoup = BeautifulSoup(documentRequest.content, features="lxml")
+    data = metadata(documentSoup)
+    data['source']=documentURL
+    writer.writerow(data)
+    upload(documentURL, documentSoup, data)
+
 def uploadDocuments(search_param):
     pageURL = 'https://galeries.limedia.fr/recherche/?'+search_param+'&page='
     r = requests.get(pageURL, allow_redirects=True)
@@ -178,18 +185,14 @@ def uploadDocuments(search_param):
         soup = BeautifulSoup(pageRequest.content, features="lxml")
         documentLinks = soup.findAll("a", "titre")
         for documentLink in documentLinks:
-            documentURL = rootURL+documentLink['href']
-            documentRequest = requests.get(documentURL, allow_redirects=True)
-            documentSoup = BeautifulSoup(documentRequest.content, features="lxml")
-            data = metadata(documentSoup)
-            #if data['imageURL'] not in blackList:
-            upload(documentURL, documentSoup, data)
+            uploadDocument(rootURL+documentLink['href'])
 
 def main():
     prefixes = [u"subjects=", u"filter_location="]
-    # subject = 'Jeanne%20d%27Arc%20(sainte%20;%201412-1431)'
-    location = u"ludres (meurthe-et-moselle)"
-    search_param = prefixes[1]+location
+    subject = 'magie'
+    search_param = prefixes[0]+subject
+    #location = u"ludres (meurthe-et-moselle)"
+    #search_param = prefixes[1]+location
     uploadDocuments(search_param)
 
-main()
+uploadDocument(u"https://galeries.limedia.fr/ark:/79345/dwf1wcgr35pnr211/")
