@@ -14,7 +14,7 @@ rootURL = 'https://galeries.limedia.fr'
 
 errorsFile = open('errors.log', 'wb')
 
-optionalFields = ['notes', 'dimensions']
+optionalFields = [u'notes', u'dimensions', u'description', u'inventaire']
 
 fields = [u'imageName', u'title', u'imageURL', u'author', u'date', u'technique', u'inventaire', u'dimensions',
  u'object_type', u'topic', u'category', u'institution', u'description', u'notes', u'source']
@@ -30,12 +30,6 @@ commons = mwclient.Site('commons.wikimedia.org')
 commons.login(username=botconfig.USER, password=botconfig.PASS)
     
 
-def image_URL(soup):
-    script = soup.findAll('script')[2].string
-    pattern = re.compile("https:\/\/[\w|.|\/|-]+")
-    imageUrl = pattern.findall(script)[0]
-    return unicode(imageUrl)
-
 def updateInstitution(metadata, institution):
     if(institution == u"bmi Epinal"):
         metadata['institution'] = u"Bibliothèque multimédia intercommunale d'Épinal"
@@ -46,8 +40,8 @@ def updateInstitution(metadata, institution):
     elif(institution == u"Médiathèque intercommunale de Saint-Dié-des-Vosges"):
         metadata['institution'] = u"Médiathèque intercommunale de Saint-Dié-des-Vosges‎ "
         metadata['category']= u"Collections of the médiathèque intercommunale de Saint-Dié-des-Vosges‎ "
-    elif(institution == u"Bibliothèques Médiathèques de Metz"):
-        metadata['institution'] = u""
+    elif(u"Metz" in institution):
+        metadata['institution'] = u"Bibliothèques Médiathèques de Metz"
         metadata['category']= u"Collections of the Bibliothèques-Médiathèques de Metz"
     elif(institution == u"Musée de l'École de Nancy"):
         metadata['institution'] = u"Musée de l'École de Nancy"
@@ -90,28 +84,42 @@ def retrieveData(source, output):
     elif(u"Source" in dataTitle):
         institution = basicData(source).split(',')
         updateInstitution(output, institution[0])
-        output['inventaire']=unicode(institution[1][1:])
+        if (len(institution) > 1):
+            output['inventaire']=unicode(institution[1][1:])
     elif(u"Description" in dataTitle):
         output['description']=basicData(source)
     elif(u"Typologies" in dataTitle):
          output['object_type']=basicData(source)
     elif(u"Technique" in dataTitle):
         output["title"] == linkedData(source)
-    elif(u"Sujets" in dataTitle):
+    elif(u"Sujet" in dataTitle):
         output['topic'] = retrieveTopics(source)
     elif(u"Editeur" in dataTitle):
         output['notes']=linkedData(source)
 
+def image_URL(soup):
+    script = soup.findAll('script')[2].string
+    pattern = re.compile("https:\/\/[\w|.|\/|-]+")
+    imageUrl = pattern.findall(script)[0]
+    return unicode(imageUrl)
+
+def imageName(metadata):
+    name = metadata['title'][:100]+" "+metadata['inventaire'] if 'inventaire' in metadata else metadata['title'][:100]
+    name = name.replace("[","").replace("]","").replace("/","sur").replace("/","")
+    return unicode(name+".jpg")
+
 def metadata(soup):
     metadata = {}
-    data = soup.findAll(class_="viewer-block viewer-meta")[0]
-    for source in data.findAll("h3"):
-        retrieveData(source, metadata)
-    metadata['imageName'] = unicode(metadata['title'][:100].replace("[","").replace("]","").replace("/","sur")+" "+metadata['inventaire'].replace("/","")+".jpg")
-    metadata['imageURL'] = image_URL(soup)
+    s = soup.findAll(class_="viewer-block viewer-meta")
+    if (len(s) > 0): # Else it's a map, not a file
+        data = s[0]
+        for source in data.findAll("h3"):
+            retrieveData(source, metadata)
+        metadata['imageName'] = imageName(metadata)
+        metadata['imageURL'] = image_URL(soup)
     return metadata
 
-def outputLines(metadata, url):
+def outputLines(metadata, url, additionnalCategories):
     lines = [
         u"== {{int:filedesc}}==\n",
         u"{{Artwork\n",
@@ -119,13 +127,14 @@ def outputLines(metadata, url):
         u"|object_type=",metadata['object_type'],u"\n",
         u"|source=",url,u"\n",
         u"|institution={{Institution:",metadata['institution'],"}}\n",
-        u"|id=",metadata['inventaire'],u"\n",
         u"|date=",metadata['date'],u"\n",
-        u"|technique=",metadata['technique'],u"\n",
-        u"|description={{fr|",metadata['description'],u"}}\n"]
+        u"|technique=",metadata['technique'],u"\n"]
     for key in optionalFields:
         if (key in metadata):
-            lines.append(u"|"+key+"={{fr|"+metadata[key]+u"}}\n")
+            if u"inventaire" in key:
+                lines.append(u"|id="+metadata['inventaire']+u"\n")
+            else:
+                lines.append(u"|"+key+"={{fr|"+metadata[key]+u"}}\n")
         else:
             metadata[key]="no value"
     lines.extend([u"}}\n\n",
@@ -147,33 +156,36 @@ def categories(topics):
     return categories
 
 
-def upload(url, soup, metadata):
-    if (u"manuscrit" not in metadata['object_type']):
+def upload(url, soup, metadata, categories):
+    fileName = u'File:{}'.format(metadata['imageName'])
+    if (u"manuscrit" not in metadata['object_type'] and not commons.pages[fileName]):
         print('Uploading '+metadata['imageName'])
         imageRequest = requests.get(metadata['imageURL'])
         image = imageRequest.content
         # Save file
         open(metadata['imageName'], 'wb').write(imageRequest.content)
         # Upload to commons
-        lines = outputLines(metadata, url)
+        lines = outputLines(metadata, url, categories)
         text = u"".join(lines).encode('utf-8')
         try:
-            commons.upload(open(metadata['imageName'], 'rb'), u'File:{}'.format(metadata['imageName']), description=text, ignore=True)
+            commons.upload(open(metadata['imageName'], 'rb'), filName, description=text, ignore=True)
         except Exception as error:
             errorsFile.write(u"".join(["\n",metadata['imageName']," - ",url]).encode('utf-8'))
             print(type(error))
         os.remove(metadata['imageName'])
 
-def uploadDocument(documentURL):
+def uploadDocument(documentURL, categories):
     documentRequest = requests.get(documentURL, allow_redirects=True)
     documentSoup = BeautifulSoup(documentRequest.content, features="lxml")
+    print(documentURL)
     data = metadata(documentSoup)
-    data['source']=documentURL
-    writer.writerow(data)
-    upload(documentURL, documentSoup, data)
+    if (len(data.keys()) > 0): #else it is not a file
+        data['source']=documentURL
+        writer.writerow(data)
+        upload(documentURL, documentSoup, data, categories)
 
-def uploadDocuments(search_param):
-    pageURL = 'https://galeries.limedia.fr/recherche/?'+search_param+'&page='
+def uploadDocuments(search_param, categories):
+    pageURL = 'https://galeries.limedia.fr/recherche/?hide=article&'+search_param+'&page='
     r = requests.get(pageURL, allow_redirects=True)
     pageSoup = BeautifulSoup(r.content, features="lxml")
     num_page = pageSoup.find_all("li", "num-page")
@@ -185,14 +197,13 @@ def uploadDocuments(search_param):
         soup = BeautifulSoup(pageRequest.content, features="lxml")
         documentLinks = soup.findAll("a", "titre")
         for documentLink in documentLinks:
-            uploadDocument(rootURL+documentLink['href'])
+            uploadDocument(rootURL+documentLink['href'], categories)
 
 def main():
     prefixes = [u"subjects=", u"filter_location="]
-    subject = 'magie'
+    subject = u'fée'
     search_param = prefixes[0]+subject
-    #location = u"ludres (meurthe-et-moselle)"
-    #search_param = prefixes[1]+location
-    uploadDocuments(search_param)
+    categories=[u"[[Category:"+categoryRoot+subject+u"]]\n"]
+    uploadDocuments(search_param, categories)
 
-uploadDocument(u"https://galeries.limedia.fr/ark:/79345/dwf1wcgr35pnr211/")
+main()
