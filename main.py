@@ -158,7 +158,9 @@ def categories(topics):
 
 def upload(url, soup, metadata, categories):
     fileName = u'File:{}'.format(metadata['imageName'])
-    if (u"manuscrit" not in metadata['object_type'] and not commons.pages[fileName]):
+    if (len(commons.pages[fileName].text())>0):
+        print(fileName+" already exists")
+    else:
         print('Uploading '+metadata['imageName'])
         imageRequest = requests.get(metadata['imageURL'])
         image = imageRequest.content
@@ -168,10 +170,10 @@ def upload(url, soup, metadata, categories):
         lines = outputLines(metadata, url, categories)
         text = u"".join(lines).encode('utf-8')
         try:
-            commons.upload(open(metadata['imageName'], 'rb'), filName, description=text, ignore=True)
+            commons.upload(open(metadata['imageName'], 'rb'), fileName, description=text, ignore=True)
         except Exception as error:
             errorsFile.write(u"".join(["\n",metadata['imageName']," - ",url]).encode('utf-8'))
-            print(type(error))
+            print(error)
         os.remove(metadata['imageName'])
 
 def uploadDocument(documentURL, categories):
