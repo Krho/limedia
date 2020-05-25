@@ -14,10 +14,10 @@ rootURL = 'https://galeries.limedia.fr'
 
 errorsFile = open('errors.log', 'wb')
 
-optionalFields = [u'notes', u'dimensions', u'description', u'inventaire']
+optionalFields = [u'notes', u'dimensions', u'description', u'inventaire', u'object_type']
 
 fields = [u'imageName', u'title', u'imageURL', u'author', u'date', u'technique', u'inventaire', u'dimensions',
- u'object_type', u'topic', u'category', u'institution', u'description', u'notes', u'source']
+ u'object_type', u'topic', u'category', u'institution', u'description', u'notes', u'source', u'technique']
 csvFileName = 'metadata.csv'
 blackList = [row['imageURL'] for row in csv.DictReader(open(csvFileName, 'rb'))]
 csvFile = open(csvFileName, 'a')
@@ -31,7 +31,7 @@ commons.login(username=botconfig.USER, password=botconfig.PASS)
     
 
 def updateInstitution(metadata, institution):
-    if(institution == u"bmi Epinal"):
+    if('bmi' in institution):
         metadata['institution'] = u"Bibliothèque multimédia intercommunale d'Épinal"
         metadata['category'] = u"Collections of the Bibliothèque multimédia intercommunale d'Épinal"
     elif(institution == u"Bibliothèques de Nancy"):
@@ -43,7 +43,7 @@ def updateInstitution(metadata, institution):
     elif(u"Metz" in institution):
         metadata['institution'] = u"Bibliothèques Médiathèques de Metz"
         metadata['category']= u"Collections of the Bibliothèques-Médiathèques de Metz"
-    elif(institution == u"Musée de l'École de Nancy"):
+    elif(u"Musée" in institution):
         metadata['institution'] = u"Musée de l'École de Nancy"
         metadata['category']= u"Collections of the Musée de l'École de Nancy"
     elif(institution == u"Médiathèque Puzzle"):
@@ -103,9 +103,12 @@ def image_URL(soup):
     imageUrl = pattern.findall(script)[0]
     return unicode(imageUrl)
 
+def sanitize(name):
+    return name.replace("[","").replace("]","").replace("/","sur").replace("/","")
+
 def imageName(metadata):
     name = metadata['title'][:100]+" "+metadata['inventaire'] if 'inventaire' in metadata else metadata['title'][:100]
-    name = name.replace("[","").replace("]","").replace("/","sur").replace("/","")
+    name = sanitize(name)
     return unicode(name+".jpg")
 
 def metadata(soup):
@@ -124,11 +127,10 @@ def outputLines(metadata, url, additionnalCategories):
         u"== {{int:filedesc}}==\n",
         u"{{Artwork\n",
         u"|title=",metadata['title'],u"\n",
-        u"|object_type=",metadata['object_type'],u"\n",
         u"|source=",url,u"\n",
         u"|institution={{Institution:",metadata['institution'],"}}\n",
-        u"|date=",metadata['date'],u"\n",
-        u"|technique=",metadata['technique'],u"\n"]
+        u"|date=",metadata['date'],u"\n"
+        ]
     for key in optionalFields:
         if (key in metadata):
             if u"inventaire" in key:
@@ -142,12 +144,18 @@ def outputLines(metadata, url, additionnalCategories):
         u"{{PD-old}}\n\n",
         u"[[Category:",metadata['category'],"]]\n"])
     lines.extend(categories(metadata['topic']))
+    lines.extend(additionnalCategories)
+    for additionalCategory in additionnalCategories:
+        categoryPage = commons.pages[sanitize(additionalCategory)]
+        if len(categoryPage.text()) == 0:
+            print(categoryPage.name)
+            categoryPage.save(limediaCategory, summary="#LimediaGallery creating temporary category")
     return lines
 
 def categories(topics):
     categories = [limediaCategory]
     for topic in topics:
-        categoryName = categoryRoot+topic
+        categoryName = sanitize(categoryRoot+topic)
         categoryPage = commons.pages["Category:"+categoryName]
         if len(categoryPage.text()) == 0:
             print(categoryPage.name)
@@ -160,6 +168,8 @@ def upload(url, soup, metadata, categories):
     fileName = u'File:{}'.format(metadata['imageName'])
     if (len(commons.pages[fileName].text())>0):
         print(fileName+" already exists")
+    elif('object_type' in metadata and "monography" in metadata["object_type"]):
+        print("Unsupported data type : monography")
     else:
         print('Uploading '+metadata['imageName'])
         imageRequest = requests.get(metadata['imageURL'])
@@ -202,10 +212,11 @@ def uploadDocuments(search_param, categories):
             uploadDocument(rootURL+documentLink['href'], categories)
 
 def main():
-    prefixes = [u"subjects=", u"filter_location="]
-    subject = u'fée'
-    search_param = prefixes[0]+subject
-    categories=[u"[[Category:"+categoryRoot+subject+u"]]\n"]
-    uploadDocuments(search_param, categories)
+    prefixes = [u"subjects", u"filter_location", u"author"]
+    subjects = [u'Art nouveau']
+    for subject in subjects:
+        search_param = prefixes[0]+u"="+subject
+        categories=[u"[[Category:"+categoryRoot+subject+u"]]\n"]
+        uploadDocuments(search_param, categories)
 
 main()
